@@ -1,0 +1,1094 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>3D City Navigator</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0a0a0a; }
+
+        #canvas-container { width: 100vw; height: 100vh; position: relative; }
+        canvas { display: block; }
+
+        /* Click-to-move marker */
+        #move-marker {
+            position: absolute; pointer-events: none;
+            width: 40px; height: 40px;
+            border: 3px solid #10b981;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 60; display: none;
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.6);
+            animation: markerPulse 1s ease-out forwards;
+        }
+        @keyframes markerPulse {
+            0% { transform: translate(-50%, -50%) scale(0.5); opacity: 1; }
+            50% { transform: translate(-50%, -50%) scale(1.2); opacity: 0.8; }
+            100% { transform: translate(-50%, -50%) scale(1); opacity: 0; }
+        }
+
+        /* Mobile toggle button - top right */
+        #mobile-toggle {
+            position: absolute; top: 16px; right: 16px;
+            width: 48px; height: 48px;
+            background: rgba(10, 15, 30, 0.92);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(100, 150, 255, 0.3);
+            border-radius: 12px;
+            display: none; /* Hidden on desktop */
+            align-items: center; justify-content: center;
+            cursor: pointer; z-index: 300;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+            transition: all 0.3s;
+        }
+        #mobile-toggle:hover { border-color: rgba(100, 150, 255, 0.6); }
+        #mobile-toggle svg { width: 24px; height: 24px; color: #60a5fa; }
+
+        /* UI Panel */
+        #ui-panel {
+            position: absolute; top: 16px; left: 16px;
+            background: rgba(10, 15, 30, 0.92);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(100, 150, 255, 0.2);
+            border-radius: 16px; padding: 18px;
+            color: #e0e8ff; width: 300px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            z-index: 100; pointer-events: auto;
+            max-height: calc(100vh - 32px);
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(59,130,246,0.3) transparent;
+        }
+        #ui-panel::-webkit-scrollbar { width: 4px; }
+        #ui-panel::-webkit-scrollbar-thumb { background: rgba(59,130,246,0.3); border-radius: 4px; }
+        #ui-panel h1 { font-size: 1.2rem; margin-bottom: 12px; color: #60a5fa; }
+
+        .btn {
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            border: none; color: white; padding: 8px 16px;
+            border-radius: 8px; cursor: pointer; font-size: 0.85rem; font-weight: 600;
+            transition: all 0.3s; width: 100%; margin-bottom: 6px;
+        }
+        .btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3); }
+        .btn.secondary { background: linear-gradient(135deg, #475569, #334155); }
+
+        .controls-info {
+            background: rgba(30, 41, 59, 0.6); border-radius: 8px;
+            padding: 10px; margin-top: 10px; border-left: 3px solid #60a5fa;
+        }
+        .controls-info p { font-size: 0.78rem; line-height: 1.5; margin-bottom: 3px; color: #cbd5e1; }
+        .controls-info .mode-title { color: #fbbf24; font-weight: 600; margin-bottom: 6px; font-size: 0.85rem; }
+        .key { 
+            display: inline-block; background: rgba(59, 130, 246, 0.25); 
+            border: 1px solid rgba(59, 130, 246, 0.4); border-radius: 4px;
+            padding: 1px 5px; font-family: monospace; font-size: 0.72rem; color: #60a5fa;
+        }
+
+        .stats {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px;
+        }
+        .stat-box {
+            background: rgba(30, 41, 59, 0.6); padding: 6px; border-radius: 6px; text-align: center;
+        }
+        .stat-box .value { font-size: 1.05rem; font-weight: 700; color: #60a5fa; }
+        .stat-box .label { font-size: 0.62rem; color: #94a3b8; text-transform: uppercase; }
+
+        #coordinates {
+            position: absolute; bottom: 16px; left: 16px;
+            background: rgba(10, 15, 30, 0.85); backdrop-filter: blur(8px);
+            border: 1px solid rgba(100, 150, 255, 0.2); border-radius: 8px;
+            padding: 8px 12px; color: #94a3b8; font-size: 0.78rem; font-family: monospace;
+            z-index: 100;
+        }
+
+        #speed-indicator {
+            position: absolute; bottom: 16px; right: 16px;
+            background: rgba(10, 15, 30, 0.85); backdrop-filter: blur(8px);
+            border: 1px solid rgba(100, 150, 255, 0.2); border-radius: 8px;
+            padding: 8px 12px; color: #94a3b8; font-size: 0.78rem;
+            z-index: 100; text-align: right;
+        }
+        #speed-indicator .speed { font-size: 1.2rem; font-weight: 700; color: #60a5fa; }
+
+        #click-hint {
+            position: absolute; bottom: 60px; left: 50%;
+            transform: translateX(-50%);
+            background: rgba(10, 15, 30, 0.9); backdrop-filter: blur(8px);
+            border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 20px;
+            padding: 8px 18px; color: #34d399; font-size: 0.8rem;
+            z-index: 100; pointer-events: none;
+            animation: hintPulse 2s infinite;
+        }
+        @keyframes hintPulse {
+            0%, 100% { opacity: 0.7; }
+            50% { opacity: 1; }
+        }
+
+        #loading {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            color: #60a5fa; font-size: 1.5rem; font-weight: 600;
+            z-index: 200; text-shadow: 0 0 20px rgba(96, 165, 250, 0.5);
+        }
+
+        .legend {
+            margin-top: 10px; padding-top: 10px;
+            border-top: 1px solid rgba(148, 163, 184, 0.2);
+        }
+        .legend-item { display: flex; align-items: center; margin-bottom: 4px; font-size: 0.75rem; color: #94a3b8; }
+        .legend-color { width: 14px; height: 14px; border-radius: 3px; margin-right: 6px; }
+
+        /* Mobile touch controls */
+        #touch-controls {
+            position: absolute; bottom: 80px; left: 20px;
+            z-index: 150; display: none; /* Hidden on desktop */
+        }
+        .touch-dpad {
+            width: 140px; height: 140px;
+            position: relative;
+        }
+        .touch-btn {
+            position: absolute; width: 44px; height: 44px;
+            background: rgba(10, 15, 30, 0.7);
+            border: 1px solid rgba(59, 130, 246, 0.4);
+            border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            color: #60a5fa; font-size: 1.2rem; font-weight: bold;
+            user-select: none; -webkit-user-select: none;
+            touch-action: none;
+        }
+        .touch-btn:active { background: rgba(59, 130, 246, 0.4); }
+        .touch-btn.up { top: 0; left: 48px; }
+        .touch-btn.down { bottom: 0; left: 48px; }
+        .touch-btn.left { top: 48px; left: 0; }
+        .touch-btn.right { top: 48px; right: 0; }
+
+        /* Mobile responsive */
+        @media (max-width: 768px) {
+            #mobile-toggle { display: flex; }
+            #ui-panel {
+                width: calc(100vw - 32px);
+                max-height: 70vh;
+                display: none; /* Hidden by default on mobile */
+            }
+            #ui-panel.mobile-visible { display: block; }
+            #touch-controls { display: block; }
+            #coordinates { font-size: 0.7rem; padding: 6px 10px; }
+            #speed-indicator { font-size: 0.7rem; padding: 6px 10px; }
+            #click-hint { font-size: 0.7rem; padding: 6px 12px; }
+        }
+
+        @media (max-width: 480px) {
+            #ui-panel { padding: 14px; }
+            #ui-panel h1 { font-size: 1.1rem; }
+            .touch-dpad { width: 120px; height: 120px; }
+            .touch-btn { width: 38px; height: 38px; font-size: 1rem; }
+            .touch-btn.up { left: 41px; }
+            .touch-btn.down { left: 41px; }
+            .touch-btn.left { top: 41px; }
+            .touch-btn.right { top: 41px; }
+        }
+    </style>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+<body>
+    <div id="loading">Building City...</div>
+    <div id="canvas-container"></div>
+    <div id="move-marker"></div>
+
+    <!-- Mobile toggle button -->
+    <div id="mobile-toggle" onclick="toggleMobilePanel()">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+        </svg>
+    </div>
+
+    <!-- Touch controls for mobile -->
+    <div id="touch-controls">
+        <div class="touch-dpad">
+            <div class="touch-btn up" id="touch-w">W</div>
+            <div class="touch-btn left" id="touch-a">A</div>
+            <div class="touch-btn down" id="touch-s">S</div>
+            <div class="touch-btn right" id="touch-d">D</div>
+        </div>
+    </div>
+
+    <div id="click-hint">🖱️ Click ground to move &nbsp;|&nbsp; Use <span class="key">W</span><span class="key">A</span><span class="key">S</span><span class="key">D</span> to walk</div>
+
+    <div id="ui-panel">
+        <h1>🏙️ City Navigator</h1>
+
+        <div class="control-group">
+            <button class="btn" id="btn-regen">🔄 New City</button>
+            <button class="btn secondary" id="btn-clear-path">❌ Clear Path</button>
+        </div>
+
+        <div class="controls-info">
+            <p class="mode-title">🗺️ Map View Controls</p>
+            <p><span class="key">W</span> <span class="key">A</span> <span class="key">S</span> <span class="key">D</span> — Walk character</p>
+            <p><span class="key">Shift</span> — Run faster</p>
+            <p><span class="key">Left Click + Drag</span> — Rotate camera</p>
+            <p><span class="key">Right Click + Drag</span> — Pan camera</p>
+            <p><span class="key">Scroll</span> — Zoom in/out</p>
+            <p><span class="key">Click ground</span> — Auto-move there</p>
+            <p><span class="key">Click nodes</span> — Set path points</p>
+        </div>
+
+        <div class="stats">
+            <div class="stat-box">
+                <div class="value" id="stat-buildings">0</div>
+                <div class="label">Buildings</div>
+            </div>
+            <div class="stat-box">
+                <div class="value" id="stat-roads">0</div>
+                <div class="label">Roads</div>
+            </div>
+            <div class="stat-box">
+                <div class="value" id="stat-distance">-</div>
+                <div class="label">Path</div>
+            </div>
+            <div class="stat-box">
+                <div class="value" id="stat-nodes">0</div>
+                <div class="label">Nodes</div>
+            </div>
+        </div>
+
+        <div class="legend">
+            <div class="legend-item">
+                <div class="legend-color" style="background: #fbbf24;"></div>
+                <span>Start Point</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #ef4444;"></div>
+                <span>End Point</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #10b981;"></div>
+                <span>Shortest Path</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #3b82f6;"></div>
+                <span>Player</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="coordinates">X: 0 | Z: 0</div>
+    <div id="speed-indicator">
+        <div class="speed" id="speed-value">0</div>
+        <div>km/h</div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // ==================== CONFIGURATION ====================
+        const CITY_SIZE = 18;
+        const BLOCK_SIZE = 28;
+        const ROAD_WIDTH = 10;
+        const MIN_BUILDING_HEIGHT = 10;
+        const MAX_BUILDING_HEIGHT = 90;
+        const BUILDING_CHANCE = 0.8;
+
+        const WALK_SPEED = 100;
+        const RUN_SPEED = 200;
+        const GRAVITY = 700;
+        const PLAYER_HEIGHT = 8;
+        const PLAYER_RADIUS = 2.5;
+
+        // ==================== STATE ====================
+        let scene, camera, renderer, controls;
+        let cityData = { nodes: [], edges: [], buildings: [], colliders: [] };
+        let startNode = null, endNode = null;
+        let pathLine = null, pathNodes = [];
+        let selectionMode = 'start';
+        let nodeMeshes = [];
+        let startMarker = null, endMarker = null;
+
+        // Player
+        let playerPos = new THREE.Vector3(0, PLAYER_HEIGHT, 0);
+        let playerVel = new THREE.Vector3(0, 0, 0);
+        let playerMesh = null;
+        let isGrounded = false;
+        let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+        let isRunning = false;
+        let yaw = 0;
+
+        // Click-to-move
+        let targetMovePos = null;
+        let isMovingToTarget = false;
+        let movePath = [];
+        let movePathIndex = 0;
+
+        // Raycaster
+        let raycaster = new THREE.Raycaster();
+        let mouse = new THREE.Vector2();
+
+        // Mobile panel toggle
+        window.toggleMobilePanel = function() {
+            const panel = document.getElementById('ui-panel');
+            panel.classList.toggle('mobile-visible');
+        };
+
+        // ==================== INITIALIZATION ====================
+        function init() {
+            const container = document.getElementById('canvas-container');
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0a0e1a);
+            scene.fog = new THREE.FogExp2(0x0a0e1a, 0.0012);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 3000);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            // Orbit controls (third person only)
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.maxPolarAngle = Math.PI / 2.1;
+            controls.minDistance = 30;
+            controls.maxDistance = 600;
+            controls.enabled = true;
+
+            setupLighting();
+            createGround();
+            createPlayerMesh();
+            generateCity();
+            setupControls();
+            setupTouchControls();
+
+            document.getElementById('loading').style.display = 'none';
+            animate();
+        }
+
+        function setupLighting() {
+            const ambient = new THREE.AmbientLight(0x404870, 0.5);
+            scene.add(ambient);
+
+            const dir = new THREE.DirectionalLight(0xffd6a5, 1.0);
+            dir.position.set(300, 400, 200);
+            dir.castShadow = true;
+            dir.shadow.mapSize.set(2048, 2048);
+            dir.shadow.camera.near = 0.5;
+            dir.shadow.camera.far = 1000;
+            dir.shadow.camera.left = -500;
+            dir.shadow.camera.right = 500;
+            dir.shadow.camera.top = 500;
+            dir.shadow.camera.bottom = -500;
+            scene.add(dir);
+
+            const hemi = new THREE.HemisphereLight(0x87ceeb, 0x1a1a2e, 0.4);
+            scene.add(hemi);
+
+            for (let i = 0; i < 10; i++) {
+                const pl = new THREE.PointLight(0xffaa44, 0.3, 100);
+                pl.position.set(
+                    (Math.random() - 0.5) * CITY_SIZE * BLOCK_SIZE,
+                    25,
+                    (Math.random() - 0.5) * CITY_SIZE * BLOCK_SIZE
+                );
+                scene.add(pl);
+            }
+        }
+
+        function createGround() {
+            const geo = new THREE.PlaneGeometry(CITY_SIZE * BLOCK_SIZE * 3, CITY_SIZE * BLOCK_SIZE * 3);
+            const mat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.9 });
+            const ground = new THREE.Mesh(geo, mat);
+            ground.rotation.x = -Math.PI / 2;
+            ground.position.y = -0.1;
+            ground.receiveShadow = true;
+            ground.name = 'ground';
+            scene.add(ground);
+
+            const grid = new THREE.GridHelper(CITY_SIZE * BLOCK_SIZE * 3, CITY_SIZE * 3, 0x1e293b, 0x0f172a);
+            grid.position.y = 0.05;
+            scene.add(grid);
+        }
+
+        function createPlayerMesh() {
+            const group = new THREE.Group();
+
+            // Body
+            const bodyGeo = new THREE.CylinderGeometry(1.5, 1.5, 6, 12);
+            const bodyMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6, emissive: 0x1d4ed8, emissiveIntensity: 0.3 });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.position.y = 3;
+            body.castShadow = true;
+            group.add(body);
+
+            // Head
+            const headGeo = new THREE.SphereGeometry(1.2, 16, 16);
+            const headMat = new THREE.MeshStandardMaterial({ color: 0x60a5fa, emissive: 0x3b82f6, emissiveIntensity: 0.4 });
+            const head = new THREE.Mesh(headGeo, headMat);
+            head.position.y = 7;
+            head.castShadow = true;
+            group.add(head);
+
+            // Glow ring
+            const ringGeo = new THREE.RingGeometry(2, 2.5, 32);
+            const ringMat = new THREE.MeshBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.4, side: THREE.DoubleSide });
+            const ring = new THREE.Mesh(ringGeo, ringMat);
+            ring.rotation.x = -Math.PI / 2;
+            ring.position.y = 0.2;
+            group.add(ring);
+
+            playerMesh = group;
+            scene.add(playerMesh);
+        }
+
+        // ==================== CITY GENERATION ====================
+        function generateCity() {
+            clearCity();
+            cityData = { nodes: [], edges: [], buildings: [], colliders: [] };
+            startNode = null; endNode = null; selectionMode = 'start';
+            targetMovePos = null; isMovingToTarget = false; movePath = [];
+
+            const offset = (CITY_SIZE * BLOCK_SIZE) / 2;
+            const nodeMap = new Map();
+
+            for (let x = 0; x <= CITY_SIZE; x++) {
+                for (let z = 0; z <= CITY_SIZE; z++) {
+                    const wx = x * BLOCK_SIZE - offset;
+                    const wz = z * BLOCK_SIZE - offset;
+                    const node = { id: cityData.nodes.length, x: wx, z: wz, gridX: x, gridZ: z, connections: [] };
+                    cityData.nodes.push(node);
+                    nodeMap.set(`${x},${z}`, node.id);
+                }
+            }
+
+            for (let x = 0; x <= CITY_SIZE; x++) {
+                for (let z = 0; z <= CITY_SIZE; z++) {
+                    const cid = nodeMap.get(`${x},${z}`);
+                    if (x < CITY_SIZE) {
+                        const rid = nodeMap.get(`${x+1},${z}`);
+                        cityData.edges.push({ from: cid, to: rid, weight: BLOCK_SIZE });
+                        cityData.nodes[cid].connections.push({ node: rid, weight: BLOCK_SIZE });
+                        cityData.nodes[rid].connections.push({ node: cid, weight: BLOCK_SIZE });
+                    }
+                    if (z < CITY_SIZE) {
+                        const bid = nodeMap.get(`${x},${z+1}`);
+                        cityData.edges.push({ from: cid, to: bid, weight: BLOCK_SIZE });
+                        cityData.nodes[cid].connections.push({ node: bid, weight: BLOCK_SIZE });
+                        cityData.nodes[bid].connections.push({ node: cid, weight: BLOCK_SIZE });
+                    }
+                }
+            }
+
+            renderRoads(offset);
+            generateBuildings(offset);
+            renderNodes();
+            updateStats();
+
+            // Spawn player at random intersection
+            const randomNode = cityData.nodes[Math.floor(Math.random() * cityData.nodes.length)];
+            playerPos.set(randomNode.x, PLAYER_HEIGHT, randomNode.z);
+            yaw = 0;
+            updatePlayerMesh();
+
+            // Set camera to look at player
+            camera.position.set(playerPos.x + 80, 100, playerPos.z + 80);
+            controls.target.copy(playerPos);
+            controls.update();
+        }
+
+        function renderRoads(offset) {
+            const roadMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.8 });
+
+            for (let z = 0; z <= CITY_SIZE; z++) {
+                const geo = new THREE.BoxGeometry(CITY_SIZE * BLOCK_SIZE, 0.3, ROAD_WIDTH);
+                const road = new THREE.Mesh(geo, roadMat);
+                road.position.set(0, 0.15, z * BLOCK_SIZE - offset);
+                road.receiveShadow = true;
+                road.userData = { type: 'road' };
+                scene.add(road);
+            }
+
+            for (let x = 0; x <= CITY_SIZE; x++) {
+                const geo = new THREE.BoxGeometry(ROAD_WIDTH, 0.3, CITY_SIZE * BLOCK_SIZE);
+                const road = new THREE.Mesh(geo, roadMat);
+                road.position.set(x * BLOCK_SIZE - offset, 0.15, 0);
+                road.receiveShadow = true;
+                road.userData = { type: 'road' };
+                scene.add(road);
+            }
+
+            // Sidewalks
+            const swMat = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.9 });
+            for (let z = 0; z < CITY_SIZE; z++) {
+                for (let x = 0; x < CITY_SIZE; x++) {
+                    const cx = x * BLOCK_SIZE + BLOCK_SIZE/2 - offset;
+                    const cz = z * BLOCK_SIZE + BLOCK_SIZE/2 - offset;
+                    const sw = BLOCK_SIZE - ROAD_WIDTH - 2;
+                    const geo = new THREE.BoxGeometry(sw, 0.4, sw);
+                    const swMesh = new THREE.Mesh(geo, swMat);
+                    swMesh.position.set(cx, 0.2, cz);
+                    swMesh.receiveShadow = true;
+                    scene.add(swMesh);
+                }
+            }
+
+            // Markings
+            const lineMat = new THREE.MeshBasicMaterial({ color: 0x64748b, transparent: true, opacity: 0.4 });
+            for (let z = 0; z < CITY_SIZE; z++) {
+                for (let x = 0; x < CITY_SIZE; x++) {
+                    const cx = x * BLOCK_SIZE + BLOCK_SIZE/2 - offset;
+                    const cz = z * BLOCK_SIZE + BLOCK_SIZE/2 - offset;
+
+                    const hLine = new THREE.Mesh(new THREE.BoxGeometry(BLOCK_SIZE - ROAD_WIDTH, 0.05, 0.3), lineMat);
+                    hLine.position.set(cx, 0.35, z * BLOCK_SIZE - offset);
+                    scene.add(hLine);
+
+                    const vLine = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, BLOCK_SIZE - ROAD_WIDTH), lineMat);
+                    vLine.position.set(x * BLOCK_SIZE - offset, 0.35, cz);
+                    scene.add(vLine);
+                }
+            }
+        }
+
+        function generateBuildings(offset) {
+            const colors = [0x475569, 0x334155, 0x1e293b, 0x0f172a, 0x64748b, 0x374151];
+            const winColors = [0xfbbf24, 0x60a5fa, 0xf472b6, 0x34d399, 0xa78bfa];
+
+            for (let x = 0; x < CITY_SIZE; x++) {
+                for (let z = 0; z < CITY_SIZE; z++) {
+                    if (Math.random() > BUILDING_CHANCE) continue;
+
+                    const cx = x * BLOCK_SIZE + BLOCK_SIZE/2 - offset;
+                    const cz = z * BLOCK_SIZE + BLOCK_SIZE/2 - offset;
+                    const plotSize = BLOCK_SIZE - ROAD_WIDTH - 4;
+
+                    const height = MIN_BUILDING_HEIGHT + Math.random() * (MAX_BUILDING_HEIGHT - MIN_BUILDING_HEIGHT);
+                    const width = plotSize * (0.5 + Math.random() * 0.4);
+                    const depth = plotSize * (0.5 + Math.random() * 0.4);
+                    const color = colors[Math.floor(Math.random() * colors.length)];
+
+                    const geo = new THREE.BoxGeometry(width, height, depth);
+                    const mat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.7, metalness: 0.2 });
+                    const building = new THREE.Mesh(geo, mat);
+                    building.position.set(cx, height/2, cz);
+                    building.castShadow = true;
+                    building.receiveShadow = true;
+                    building.userData = { type: 'building' };
+                    scene.add(building);
+                    cityData.buildings.push(building);
+
+                    cityData.colliders.push({
+                        minX: cx - width/2 - PLAYER_RADIUS,
+                        maxX: cx + width/2 + PLAYER_RADIUS,
+                        minZ: cz - depth/2 - PLAYER_RADIUS,
+                        maxZ: cz + depth/2 + PLAYER_RADIUS,
+                        height: height
+                    });
+
+                    // Windows
+                    const winMat = new THREE.MeshBasicMaterial({ 
+                        color: winColors[Math.floor(Math.random() * winColors.length)], 
+                        transparent: true, opacity: 0.6 
+                    });
+                    const floors = Math.floor(height / 5);
+                    const winCount = Math.floor(width / 4);
+
+                    for (let f = 1; f < floors; f++) {
+                        for (let w = 0; w < winCount; w++) {
+                            if (Math.random() > 0.6) continue;
+                            const winGeo = new THREE.PlaneGeometry(2, 3);
+                            const win = new THREE.Mesh(winGeo, winMat);
+                            win.position.set(cx - width/2 + 3 + w * 4, f * 5, cz + depth/2 + 0.1);
+                            scene.add(win);
+                        }
+                    }
+
+                    // Roof
+                    if (Math.random() > 0.5) {
+                        const rh = 2 + Math.random() * 4;
+                        const rGeo = new THREE.BoxGeometry(width * 0.3, rh, depth * 0.3);
+                        const rMat = new THREE.MeshStandardMaterial({ color: 0x1e293b });
+                        const roof = new THREE.Mesh(rGeo, rMat);
+                        roof.position.set(cx, height + rh/2, cz);
+                        roof.castShadow = true;
+                        scene.add(roof);
+
+                        cityData.colliders.push({
+                            minX: cx - width*0.3/2 - PLAYER_RADIUS,
+                            maxX: cx + width*0.3/2 + PLAYER_RADIUS,
+                            minZ: cz - depth*0.3/2 - PLAYER_RADIUS,
+                            maxZ: cz + depth*0.3/2 + PLAYER_RADIUS,
+                            height: height + rh
+                        });
+                    }
+                }
+            }
+        }
+
+        function renderNodes() {
+            nodeMeshes.forEach(m => scene.remove(m));
+            nodeMeshes = [];
+
+            const geo = new THREE.SphereGeometry(2, 16, 16);
+            const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.3 });
+
+            cityData.nodes.forEach(node => {
+                const mesh = new THREE.Mesh(geo, mat.clone());
+                mesh.position.set(node.x, 2, node.z);
+                mesh.userData = { type: 'node', nodeId: node.id };
+                scene.add(mesh);
+                nodeMeshes.push(mesh);
+            });
+        }
+
+        // ==================== PATH FINDING ====================
+        function dijkstra(startId, endId) {
+            const dist = new Array(cityData.nodes.length).fill(Infinity);
+            const prev = new Array(cityData.nodes.length).fill(null);
+            const visited = new Set();
+            dist[startId] = 0;
+
+            const pq = [{ id: startId, dist: 0 }];
+            while (pq.length > 0) {
+                pq.sort((a, b) => a.dist - b.dist);
+                const cur = pq.shift();
+                if (visited.has(cur.id)) continue;
+                visited.add(cur.id);
+                if (cur.id === endId) break;
+
+                for (const conn of cityData.nodes[cur.id].connections) {
+                    if (visited.has(conn.node)) continue;
+                    const nd = dist[cur.id] + conn.weight;
+                    if (nd < dist[conn.node]) {
+                        dist[conn.node] = nd;
+                        prev[conn.node] = cur.id;
+                        pq.push({ id: conn.node, dist: nd });
+                    }
+                }
+            }
+
+            const path = [];
+            let c = endId;
+            while (c !== null) { path.unshift(c); c = prev[c]; }
+            if (path[0] !== startId) return null;
+            return { path, distance: dist[endId] };
+        }
+
+        function visualizePath(path, distance) {
+            if (pathLine) { scene.remove(pathLine); pathLine = null; }
+            pathNodes.forEach(m => scene.remove(m));
+            pathNodes = [];
+
+            if (!path || path.length < 2) return;
+
+            const points = path.map(id => {
+                const n = cityData.nodes[id];
+                return new THREE.Vector3(n.x, 3, n.z);
+            });
+
+            const curve = new THREE.CatmullRomCurve3(points);
+            const tubeGeo = new THREE.TubeGeometry(curve, points.length * 4, 1.5, 8, false);
+            const tubeMat = new THREE.MeshStandardMaterial({
+                color: 0x10b981, emissive: 0x10b981, emissiveIntensity: 0.5, transparent: true, opacity: 0.9
+            });
+            pathLine = new THREE.Mesh(tubeGeo, tubeMat);
+            scene.add(pathLine);
+
+            const pGeo = new THREE.SphereGeometry(1, 8, 8);
+            const pMat = new THREE.MeshBasicMaterial({ color: 0x34d399 });
+            for (let i = 0; i < 6; i++) {
+                const p = new THREE.Mesh(pGeo, pMat);
+                p.userData = { progress: i / 6, speed: 0.003 + Math.random() * 0.003 };
+                scene.add(p);
+                pathNodes.push(p);
+            }
+
+            document.getElementById('stat-distance').textContent = distance.toFixed(1) + 'm';
+        }
+
+        // ==================== CONTROLS ====================
+        function setupControls() {
+            const canvas = renderer.domElement;
+
+            // Click handler
+            canvas.addEventListener('click', (e) => {
+                handleClick(e);
+            });
+
+            // Keyboard
+            document.addEventListener('keydown', (e) => {
+                switch(e.code) {
+                    case 'KeyW': moveForward = true; break;
+                    case 'KeyS': moveBackward = true; break;
+                    case 'KeyA': moveLeft = true; break;
+                    case 'KeyD': moveRight = true; break;
+                    case 'ShiftLeft': isRunning = true; break;
+                }
+            });
+
+            document.addEventListener('keyup', (e) => {
+                switch(e.code) {
+                    case 'KeyW': moveForward = false; break;
+                    case 'KeyS': moveBackward = false; break;
+                    case 'KeyA': moveLeft = false; break;
+                    case 'KeyD': moveRight = false; break;
+                    case 'ShiftLeft': isRunning = false; break;
+                }
+            });
+
+            // UI buttons
+            document.getElementById('btn-regen').addEventListener('click', generateCity);
+            document.getElementById('btn-clear-path').addEventListener('click', clearPath);
+        }
+
+        function setupTouchControls() {
+            // Touch D-pad controls
+            const touchMap = {
+                'touch-w': 'KeyW',
+                'touch-s': 'KeyS',
+                'touch-a': 'KeyA',
+                'touch-d': 'KeyD'
+            };
+
+            Object.entries(touchMap).forEach(([id, keyCode]) => {
+                const btn = document.getElementById(id);
+                if (!btn) return;
+
+                const startHandler = (e) => {
+                    e.preventDefault();
+                    const event = new KeyboardEvent('keydown', { code: keyCode });
+                    document.dispatchEvent(event);
+                    btn.style.background = 'rgba(59, 130, 246, 0.4)';
+                };
+
+                const endHandler = (e) => {
+                    e.preventDefault();
+                    const event = new KeyboardEvent('keyup', { code: keyCode });
+                    document.dispatchEvent(event);
+                    btn.style.background = 'rgba(10, 15, 30, 0.7)';
+                };
+
+                btn.addEventListener('touchstart', startHandler, { passive: false });
+                btn.addEventListener('touchend', endHandler, { passive: false });
+                btn.addEventListener('touchcancel', endHandler, { passive: false });
+                btn.addEventListener('mousedown', startHandler);
+                btn.addEventListener('mouseup', endHandler);
+                btn.addEventListener('mouseleave', endHandler);
+            });
+        }
+
+        function handleClick(event) {
+            // Don't handle clicks on UI elements
+            if (event.target.closest('#ui-panel') || event.target.closest('#mobile-toggle')) return;
+
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+
+            // Check for node intersections (path selection)
+            const nodeIntersects = raycaster.intersectObjects(nodeMeshes);
+            if (nodeIntersects.length > 0) {
+                const nodeId = nodeIntersects[0].object.userData.nodeId;
+                if (selectionMode === 'start') setStartNode(nodeId);
+                else if (selectionMode === 'end') setEndNode(nodeId);
+                return;
+            }
+
+            // Check for ground click (move player)
+            const groundIntersects = raycaster.intersectObjects(scene.children.filter(c => c.name === 'ground'));
+            if (groundIntersects.length > 0) {
+                const point = groundIntersects[0].point;
+
+                // Show click marker
+                const marker = document.getElementById('move-marker');
+                marker.style.display = 'block';
+                marker.style.left = event.clientX + 'px';
+                marker.style.top = event.clientY + 'px';
+                setTimeout(() => { marker.style.display = 'none'; }, 1000);
+
+                targetMovePos = new THREE.Vector3(point.x, PLAYER_HEIGHT, point.z);
+                isMovingToTarget = true;
+
+                const startNodeId = findNearestNode(playerPos.x, playerPos.z);
+                const endNodeId = findNearestNode(point.x, point.z);
+
+                if (startNodeId !== null && endNodeId !== null && startNodeId !== endNodeId) {
+                    const result = dijkstra(startNodeId, endNodeId);
+                    if (result) {
+                        movePath = result.path.map(id => cityData.nodes[id]);
+                        movePathIndex = 0;
+                    }
+                }
+            }
+        }
+
+        function findNearestNode(x, z) {
+            let nearest = null;
+            let minDist = Infinity;
+            cityData.nodes.forEach(node => {
+                const d = Math.sqrt((node.x - x)**2 + (node.z - z)**2);
+                if (d < minDist) { minDist = d; nearest = node.id; }
+            });
+            return nearest;
+        }
+
+        function setStartNode(nodeId) {
+            startNode = cityData.nodes[nodeId];
+            selectionMode = 'end';
+
+            if (startMarker) scene.remove(startMarker);
+            const geo = new THREE.SphereGeometry(3, 16, 16);
+            const mat = new THREE.MeshStandardMaterial({ color: 0xfbbf24, emissive: 0xfbbf24, emissiveIntensity: 0.8 });
+            startMarker = new THREE.Mesh(geo, mat);
+            startMarker.position.set(startNode.x, 4, startNode.z);
+            scene.add(startMarker);
+
+            const nm = nodeMeshes.find(m => m.userData.nodeId === nodeId);
+            if (nm) { nm.material.color.setHex(0xfbbf24); nm.material.emissive.setHex(0xfbbf24); nm.material.emissiveIntensity = 0.8; }
+        }
+
+        function setEndNode(nodeId) {
+            if (nodeId === startNode.id) return;
+            endNode = cityData.nodes[nodeId];
+            selectionMode = 'none';
+
+            if (endMarker) scene.remove(endMarker);
+            const geo = new THREE.SphereGeometry(3, 16, 16);
+            const mat = new THREE.MeshStandardMaterial({ color: 0xef4444, emissive: 0xef4444, emissiveIntensity: 0.8 });
+            endMarker = new THREE.Mesh(geo, mat);
+            endMarker.position.set(endNode.x, 4, endNode.z);
+            scene.add(endMarker);
+
+            const nm = nodeMeshes.find(m => m.userData.nodeId === nodeId);
+            if (nm) { nm.material.color.setHex(0xef4444); nm.material.emissive.setHex(0xef4444); nm.material.emissiveIntensity = 0.8; }
+
+            const result = dijkstra(startNode.id, endNode.id);
+            if (result) visualizePath(result.path, result.distance);
+        }
+
+        function clearPath() {
+            if (pathLine) { scene.remove(pathLine); pathLine = null; }
+            pathNodes.forEach(m => scene.remove(m));
+            pathNodes = [];
+            if (startMarker) { scene.remove(startMarker); startMarker = null; }
+            if (endMarker) { scene.remove(endMarker); endMarker = null; }
+            startNode = null; endNode = null; selectionMode = 'start';
+            targetMovePos = null; isMovingToTarget = false; movePath = [];
+            nodeMeshes.forEach(m => { m.material.color.setHex(0xffffff); m.material.emissive.setHex(0xffffff); m.material.emissiveIntensity = 0.3; });
+            document.getElementById('stat-distance').textContent = '-';
+        }
+
+        // ==================== PHYSICS & MOVEMENT ====================
+        function updatePlayerMesh() {
+            if (playerMesh) {
+                playerMesh.position.copy(playerPos);
+                playerMesh.position.y = 0;
+                playerMesh.rotation.y = yaw + Math.PI;
+            }
+        }
+
+        function updatePhysics(dt) {
+            const speed = isRunning ? RUN_SPEED : WALK_SPEED;
+
+            // Get camera forward direction, projected onto XZ plane
+            const camForward = new THREE.Vector3();
+            camera.getWorldDirection(camForward);
+            camForward.y = 0;
+            camForward.normalize();
+
+            // Camera right direction
+            const camRight = new THREE.Vector3();
+            camRight.crossVectors(camForward, new THREE.Vector3(0, 1, 0)).normalize();
+
+            let moveDir = new THREE.Vector3(0, 0, 0);
+            if (moveForward) moveDir.add(camForward);
+            if (moveBackward) moveDir.sub(camForward);
+            if (moveLeft) moveDir.sub(camRight);
+            if (moveRight) moveDir.add(camRight);
+
+            if (moveDir.length() > 0) {
+                moveDir.normalize();
+                playerVel.x = moveDir.x * speed;
+                playerVel.z = moveDir.z * speed;
+                yaw = Math.atan2(moveDir.x, moveDir.z);
+            } else {
+                playerVel.x *= 0.8;
+                playerVel.z *= 0.8;
+            }
+
+            // Gravity
+            playerVel.y -= GRAVITY * dt;
+
+            const newPos = playerPos.clone();
+            newPos.x += playerVel.x * dt;
+            newPos.z += playerVel.z * dt;
+            newPos.y += playerVel.y * dt;
+
+            // Ground collision
+            if (newPos.y < PLAYER_HEIGHT) {
+                newPos.y = PLAYER_HEIGHT;
+                playerVel.y = 0;
+                isGrounded = true;
+            } else {
+                isGrounded = false;
+            }
+
+            // Building collision
+            let collidedX = false, collidedZ = false;
+            for (const col of cityData.colliders) {
+                if (newPos.x > col.minX && newPos.x < col.maxX && 
+                    playerPos.z > col.minZ && playerPos.z < col.maxZ &&
+                    newPos.y < col.height + PLAYER_HEIGHT) collidedX = true;
+                if (playerPos.x > col.minX && playerPos.x < col.maxX && 
+                    newPos.z > col.minZ && newPos.z < col.maxZ &&
+                    newPos.y < col.height + PLAYER_HEIGHT) collidedZ = true;
+            }
+
+            if (!collidedX) playerPos.x = newPos.x;
+            if (!collidedZ) playerPos.z = newPos.z;
+            playerPos.y = newPos.y;
+
+            // Update camera to follow player
+            const camOffset = new THREE.Vector3().subVectors(camera.position, controls.target);
+            controls.target.lerp(playerPos, 0.15);
+            camera.position.copy(controls.target).add(camOffset);
+
+            // Click-to-move auto path following
+            if (isMovingToTarget && movePath.length > 0) {
+                // Cancel auto-move if player presses WASD
+                if (moveForward || moveBackward || moveLeft || moveRight) {
+                    isMovingToTarget = false;
+                    movePath = [];
+                } else {
+                    const targetSpeed = 120;
+                    const targetNode = movePath[movePathIndex];
+                    const target = new THREE.Vector3(targetNode.x, PLAYER_HEIGHT, targetNode.z);
+                    const dir = new THREE.Vector3().subVectors(target, playerPos);
+                    const dist = dir.length();
+
+                    if (dist < 2) {
+                        movePathIndex++;
+                        if (movePathIndex >= movePath.length) {
+                            isMovingToTarget = false;
+                            movePath = [];
+                        }
+                    } else {
+                        dir.normalize();
+                        const newPos = playerPos.clone().add(dir.multiplyScalar(targetSpeed * dt));
+
+                        let canMove = true;
+                        for (const col of cityData.colliders) {
+                            if (newPos.x > col.minX && newPos.x < col.maxX && 
+                                newPos.z > col.minZ && newPos.z < col.maxZ &&
+                                newPos.y < col.height + PLAYER_HEIGHT) {
+                                canMove = false; break;
+                            }
+                        }
+
+                        if (canMove) {
+                            playerPos.copy(newPos);
+                            yaw = Math.atan2(dir.x, dir.z);
+                        }
+                    }
+                }
+            }
+
+            updatePlayerMesh();
+
+            const speedKmh = Math.sqrt(playerVel.x**2 + playerVel.z**2) * 3.6;
+            document.getElementById('speed-value').textContent = Math.round(speedKmh);
+            document.getElementById('coordinates').textContent = 
+                `X: ${Math.round(playerPos.x)} | Z: ${Math.round(playerPos.z)}`;
+        }
+
+        // ==================== ANIMATION ====================
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const dt = 0.016;
+            updatePhysics(dt);
+            controls.update();
+
+            // Animate path particles
+            pathNodes.forEach(p => {
+                if (pathLine && p.userData.progress !== undefined) {
+                    p.userData.progress += p.userData.speed;
+                    if (p.userData.progress > 1) p.userData.progress = 0;
+                    const curve = pathLine.geometry.parameters.path;
+                    const pt = curve.getPoint(p.userData.progress);
+                    p.position.copy(pt);
+                    p.position.y += 3;
+                }
+            });
+
+            // Pulse markers
+            const time = Date.now() * 0.002;
+            if (startMarker) {
+                startMarker.position.y = 4 + Math.sin(time) * 0.5;
+                startMarker.scale.setScalar(1 + Math.sin(time * 2) * 0.1);
+            }
+            if (endMarker) {
+                endMarker.position.y = 4 + Math.sin(time + Math.PI) * 0.5;
+                endMarker.scale.setScalar(1 + Math.sin(time * 2 + Math.PI) * 0.1);
+            }
+
+            // Rotate player glow ring
+            if (playerMesh) {
+                playerMesh.children[2].rotation.z += 0.02;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // ==================== UTILITIES ====================
+        function clearCity() {
+            const toRemove = [];
+            scene.children.forEach(child => {
+                if (child.userData.type === 'building' || child.userData.type === 'road' || 
+                    child.userData.type === 'node' || 
+                    (child.geometry && child.geometry.type === 'BoxGeometry' && 
+                     child !== playerMesh && child !== startMarker && child !== endMarker) ||
+                    (child.geometry && child.geometry.type === 'PlaneGeometry' && child.position.y > 0.5)) {
+                    toRemove.push(child);
+                }
+            });
+            toRemove.forEach(obj => scene.remove(obj));
+
+            if (pathLine) scene.remove(pathLine);
+            pathNodes.forEach(m => scene.remove(m));
+            if (startMarker) scene.remove(startMarker);
+            if (endMarker) scene.remove(endMarker);
+
+            pathLine = null; pathNodes = []; startMarker = null; endMarker = null; nodeMeshes = [];
+        }
+
+        function updateStats() {
+            document.getElementById('stat-buildings').textContent = cityData.buildings.length;
+            document.getElementById('stat-roads').textContent = cityData.edges.length;
+            document.getElementById('stat-nodes').textContent = cityData.nodes.length;
+            document.getElementById('stat-distance').textContent = '-';
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Start
+        init();
+    </script>
+</body>
+  </html>
